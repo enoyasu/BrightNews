@@ -109,8 +109,8 @@ private struct WelcomeBanner: View {
         let hour = Calendar.current.component(.hour, from: Date())
         switch hour {
         case 5..<12:  return "おはようございます ☀️"
-        case 12..<17: return "こんにちは 🌤"
-        case 17..<21: return "こんにちは 🌇"
+        case 12..<17: return "こんにちは 🌞"
+        case 17..<21: return "こんにちは 🌆"
         default:       return "お疲れさまでした 🌙"
         }
     }
