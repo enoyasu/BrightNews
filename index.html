@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrightNews - 明るいニュースだけを届けるiOSアプリ</title>
+  <style>
+    :root { --primary: #5CB6E6; --orange: #F7AB2E; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+      background: linear-gradient(160deg, #e8f5fc 0%, #f0f8ff 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      color: #1a1a1a;
+    }
+    .icon {
+      width: 120px; height: 120px;
+      background: white;
+      border-radius: 27px;
+      box-shadow: 0 8px 32px rgba(92,182,230,.25);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 60px;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 32px; font-weight: 800; color: var(--primary); margin-bottom: 8px; }
+    .tagline { font-size: 16px; color: #555; margin-bottom: 40px; text-align: center; }
+    .links {
+      display: flex; flex-direction: column; gap: 12px;
+      width: 100%; max-width: 300px;
+    }
+    .links a {
+      display: block;
+      text-align: center;
+      padding: 14px 20px;
+      border-radius: 12px;
+      text-decoration: none;
+      font-size: 15px;
+      font-weight: 600;
+      transition: opacity .2s;
+    }
+    .links a:hover { opacity: .8; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-secondary {
+      background: white;
+      color: var(--primary);
+      border: 2px solid var(--primary);
+      font-size: 14px;
+    }
+    footer { margin-top: 48px; font-size: 12px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="icon">☀️</div>
+  <h1>BrightNews</h1>
+  <p class="tagline">明るいニュースだけを届けるiOSアプリ<br>犯罪・事故・不安ゼロ。心が温まるニュースだけ。</p>
+
+  <div class="links">
+    <a class="btn-primary" href="https://apps.apple.com/jp/developer/brightnews" target="_blank">
+      📱 App Store で入手
+    </a>
+    <a class="btn-secondary" href="legal/privacy_policy.html">
+      🔒 プライバシーポリシー
+    </a>
+    <a class="btn-secondary" href="legal/terms_of_service.html">
+      📄 利用規約
+    </a>
+  </div>
+
+  <footer>&copy; 2026 BrightNews. All rights reserved.</footer>
+</body>
+</html>
