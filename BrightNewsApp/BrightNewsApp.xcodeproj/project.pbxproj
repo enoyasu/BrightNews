@@ -65,6 +65,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B0AFD5B12F770001006E882A /* GoogleMobileAds in Frameworks */,
+			
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +127,7 @@
 			);
 			name = BrightNewsApp;
 			packageProductDependencies = (
+				B0AFD5B02F770000006E882A /* GoogleMobileAds */,
 			);
 			productName = BrightNewsApp;
 			productReference = B0AFD4152F760B0B006E882A /* BrightNewsApp.app */;
@@ -208,6 +211,9 @@
 			);
 			mainGroup = B0AFD40C2F760B0B006E882A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B0AFD5A52F765941006E882A /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B0AFD4162F760B0B006E882A /* Products */;
 			projectDirPath = "";
@@ -583,6 +589,24 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B0AFD5B02F770000006E882A /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0AFD5A52F765941006E882A /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
+/* Begin XCRemoteSwiftPackageReference section */
+		B0AFD5A52F765941006E882A /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 13.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = B0AFD40D2F760B0B006E882A /* Project object */;
 }

@@ -1,12 +1,10 @@
 import SwiftUI
-import GoogleMobileAds
+import GoogleMobileAds  // v13+: GAD プレフィックスなし
 
 // MARK: - バナー広告ビュー（記事詳細画面下部）
-// アダプティブバナー：画面幅に合わせて自動リサイズ
-// 表示位置：ArticleDetailView のスクロール最下部
+// アダプティブバナー：画面幅に自動フィット
 
 struct BannerAdView: View {
-    /// 広告の実際の高さ（広告ロード後に動的に更新）
     @State private var adHeight: CGFloat = 50
 
     var body: some View {
@@ -14,7 +12,6 @@ struct BannerAdView: View {
             .frame(width: UIScreen.main.bounds.width, height: adHeight)
             .background(Color(uiColor: .systemGray6))
             .overlay(alignment: .top) {
-                // 上ボーダーライン
                 Rectangle()
                     .frame(height: 0.5)
                     .foregroundColor(Color(uiColor: .systemGray4))
@@ -28,36 +25,31 @@ private struct BannerAdRepresentable: UIViewRepresentable {
 
     @Binding var adHeight: CGFloat
 
-    func makeUIView(context: Context) -> GADBannerView {
-        // アダプティブバナー（画面幅に合わせた最適サイズ）
+    func makeCoordinator() -> Coordinator { Coordinator(adHeight: $adHeight) }
+
+    func makeUIView(context: Context) -> BannerView {
+        // v13: GADCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth
+        //      → currentOrientationAnchoredAdaptiveBannerAdSize(withWidth:)
         let width = UIScreen.main.bounds.width
-        let adSize = GADCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth(width)
+        let adSize = largeAnchoredAdaptiveBanner(width: width)
 
-        let bannerView = GADBannerView(adSize: adSize)
-        bannerView.adUnitID = AdConfig.bannerAdUnitID
-        bannerView.rootViewController = context.coordinator.rootViewController
-        bannerView.delegate = context.coordinator
-        bannerView.load(GADRequest())
-        return bannerView
+        let banner = BannerView(adSize: adSize)           // v13: GADBannerView → BannerView
+        banner.adUnitID = AdConfig.bannerAdUnitID
+        banner.rootViewController = context.coordinator.rootViewController
+        banner.delegate = context.coordinator
+        banner.load(Request())                            // v13: GADRequest → Request
+        return banner
     }
 
-    func updateUIView(_ uiView: GADBannerView, context: Context) {}
+    func updateUIView(_ uiView: BannerView, context: Context) {}
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(adHeight: $adHeight)
-    }
+    // MARK: Coordinator（BannerViewDelegate）
 
-    // MARK: - Coordinator（GADBannerViewDelegate）
-
-    final class Coordinator: NSObject, GADBannerViewDelegate {
+    final class Coordinator: NSObject, BannerViewDelegate { // v13: GADBannerViewDelegate → BannerViewDelegate
 
         @Binding var adHeight: CGFloat
+        init(adHeight: Binding<CGFloat>) { _adHeight = adHeight }
 
-        init(adHeight: Binding<CGFloat>) {
-            _adHeight = adHeight
-        }
-
-        /// キーウィンドウの rootViewController を取得
         var rootViewController: UIViewController? {
             UIApplication.shared.connectedScenes
                 .compactMap { $0 as? UIWindowScene }
@@ -67,19 +59,14 @@ private struct BannerAdRepresentable: UIViewRepresentable {
         }
 
         // 広告ロード成功 → 実際の高さに更新
-        func bannerViewDidReceiveAd(_ bannerView: GADBannerView) {
-            DispatchQueue.main.async {
-                self.adHeight = bannerView.adSize.size.height
-            }
+        func bannerViewDidReceiveAd(_ bannerView: BannerView) {
+            DispatchQueue.main.async { self.adHeight = bannerView.adSize.size.height }
         }
 
-        // 広告ロード失敗
-        func bannerView(_ bannerView: GADBannerView, didFailToReceiveAdWithError error: Error) {
-            print("BrightNews: バナー広告読み込み失敗 - \(error.localizedDescription)")
+        func bannerView(_ bannerView: BannerView, didFailToReceiveAdWithError error: Error) {
+            print("BrightNews: バナー広告失敗 - \(error.localizedDescription)")
         }
     }
 }
 
-#Preview {
-    BannerAdView()
-}
+#Preview { BannerAdView() }
