@@ -9,6 +9,7 @@ struct ArticleDetailView: View {
 
     @EnvironmentObject var favoritesService: FavoritesService
     @EnvironmentObject var appSettings: AppSettings
+    @EnvironmentObject var purchaseService: PurchaseService
 
     @State private var showSafari = false
     @State private var bookmarkScale: CGFloat = 1.0
@@ -134,6 +135,11 @@ struct ArticleDetailView: View {
                     Spacer(minLength: 20)
                 }
                 .padding(18)
+
+                // MARK: バナー広告（プレミアムユーザーは非表示）
+                if !purchaseService.isPremium {
+                    BannerAdView()
+                }
             }
         }
         .background(Color.brightBackground)

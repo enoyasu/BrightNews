@@ -30,7 +30,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		B0AFD4FF2F760B13006E882A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		B0AFD4FF2F760B13006E882A /* Exceptions for "BrightNewsApp" folder in "BrightNewsApp" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -43,7 +43,7 @@
 		B0AFD4172F760B0B006E882A /* BrightNewsApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B0AFD4FF2F760B13006E882A /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				B0AFD4FF2F760B13006E882A /* Exceptions for "BrightNewsApp" folder in "BrightNewsApp" target */,
 			);
 			path = BrightNewsApp;
 			sourceTree = "<group>";

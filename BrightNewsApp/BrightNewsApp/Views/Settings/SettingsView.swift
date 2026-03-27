@@ -6,7 +6,10 @@ import UserNotifications
 struct SettingsView: View {
 
     @EnvironmentObject var appSettings: AppSettings
+    @EnvironmentObject var purchaseService: PurchaseService
     @StateObject private var viewModel = SettingsViewModel()
+
+    @State private var showPremium = false
 
     // 通知時刻の一時保存（DatePicker用）
     @State private var notificationTime: Date = {
@@ -18,6 +21,66 @@ struct SettingsView: View {
 
     var body: some View {
         List {
+
+            // MARK: プレミアム
+            Section {
+                if purchaseService.isPremium {
+                    // プレミアム会員バッジ
+                    HStack(spacing: 12) {
+                        Image(systemName: "crown.fill")
+                            .foregroundColor(.yellow)
+                            .font(.title3)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("プレミアム会員")
+                                .font(.body.weight(.semibold))
+                            Text("広告なしでご利用いただけます")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                    }
+                } else {
+                    // プレミアム誘導バナー
+                    Button {
+                        showPremium = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.brightPrimary, Color.yellow.opacity(0.8)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "crown.fill")
+                                    .foregroundColor(.white)
+                                    .font(.footnote)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("広告を非表示にする")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundColor(.primary)
+                                Text("月額¥250〜 広告ゼロで快適に")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showPremium) {
+                PremiumView()
+                    .environmentObject(purchaseService)
+            }
 
             // MARK: お気に入り
             Section {

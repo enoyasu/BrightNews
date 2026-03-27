@@ -7,6 +7,7 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @EnvironmentObject var favoritesService: FavoritesService
     @EnvironmentObject var appSettings: AppSettings
+    @EnvironmentObject var purchaseService: PurchaseService
 
     var body: some View {
         ScrollView {
@@ -29,18 +30,25 @@ struct HomeView: View {
                     }
                     .padding(.top, 40)
                 } else {
-                    // 記事カード一覧
-                    ForEach(viewModel.articles) { article in
-                        NavigationLink(destination: ArticleDetailView(article: article)) {
-                            ArticleCardView(article: article)
-                                .padding(.horizontal)
-                        }
-                        .buttonStyle(.plain)
-                        // 最後の記事が表示されたら追加読み込み
-                        .onAppear {
-                            if article.id == viewModel.articles.last?.id {
-                                Task { await viewModel.loadMoreArticles() }
+                    // 記事＋広告の混合フィード
+                    ForEach(viewModel.feedItems) { item in
+                        switch item {
+                        case .article(let article):
+                            NavigationLink(destination: ArticleDetailView(article: article)) {
+                                ArticleCardView(article: article)
+                                    .padding(.horizontal)
                             }
+                            .buttonStyle(.plain)
+                            // 最後のアイテムが表示されたら追加読み込み
+                            .onAppear {
+                                if article.id == viewModel.articles.last?.id {
+                                    Task { await viewModel.loadMoreArticles(
+                                        isPremium: purchaseService.isPremium) }
+                                }
+                            }
+
+                        case .nativeAd:
+                            NativeAdCardView()
                         }
                     }
 
@@ -79,12 +87,16 @@ struct HomeView: View {
             }
         }
         .refreshable {
-            await viewModel.refresh()
+            await viewModel.refresh(isPremium: purchaseService.isPremium)
         }
         .task {
             if viewModel.articles.isEmpty {
-                await viewModel.loadArticles()
+                await viewModel.loadArticles(isPremium: purchaseService.isPremium)
             }
+        }
+        // プレミアム状態が変わったらフィードを再構築（広告の表示/非表示を即時反映）
+        .onChange(of: purchaseService.isPremium) { _, _ in
+            Task { await viewModel.refresh(isPremium: purchaseService.isPremium) }
         }
     }
 }
