@@ -131,13 +131,11 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // TODO: 公開後に実際のURLへ変更してください
-                Link(destination: URL(string: "https://your-domain.com/privacy")!) {
+                Link(destination: URL(string: "https://enoyasu.github.io/BrightNews/legal/privacy_policy.html")!) {
                     Label("プライバシーポリシー", systemImage: "lock.shield.fill")
                 }
 
-                // TODO: 公開後に実際のURLへ変更してください
-                Link(destination: URL(string: "https://your-domain.com/terms")!) {
+                Link(destination: URL(string: "https://enoyasu.github.io/BrightNews/legal/terms_of_service.html")!) {
                     Label("利用規約", systemImage: "doc.text.fill")
                 }
 
