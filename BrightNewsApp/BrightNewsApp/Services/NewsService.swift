@@ -24,6 +24,7 @@ private struct BackendArticleResponse: Codable {
     let summary:    String
     let category:   String
     let url:        String
+    let image_url:  String?
     let created_at: String
 }
 
@@ -352,7 +353,7 @@ final class NewsService {
                 title:       item.title,
                 summary:     item.summary,
                 content:     item.summary,
-                imageURL:    "",
+                imageURL:    item.image_url ?? "",
                 sourceURL:   item.url,
                 sourceName:  "BrightNews",
                 publishedAt: date,

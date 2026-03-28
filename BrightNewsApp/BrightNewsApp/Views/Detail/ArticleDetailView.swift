@@ -15,6 +15,19 @@ struct ArticleDetailView: View {
     @State private var fetchedBody: String = ""
     @State private var isLoadingBody = false
 
+    /// 本文取得後に先頭段落から生成した概要（取得前は article.summary を使用）
+    private var displayedSummary: String {
+        guard !fetchedBody.isEmpty else { return article.summary }
+        // 本文の最初の段落を概要として使用（最大150文字）
+        let firstParagraph = fetchedBody
+            .components(separatedBy: "\n\n")
+            .first(where: { $0.count >= 30 }) ?? ""
+        if firstParagraph.isEmpty { return article.summary }
+        return firstParagraph.count > 150
+            ? String(firstParagraph.prefix(150)) + "…"
+            : firstParagraph
+    }
+
     private var isFavorite: Bool {
         favoritesService.isFavorite(article)
     }
@@ -72,7 +85,7 @@ struct ArticleDetailView: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundColor(.secondary)
 
-                        Text(article.summary)
+                        Text(displayedSummary)
                             .font(.system(size: appSettings.fontSize.bodySize))
                             .foregroundColor(.primary)
                             .lineSpacing(7)
