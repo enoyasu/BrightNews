@@ -1,9 +1,7 @@
 import Foundation
 
 // MARK: - バックエンドAPI設定
-// TODO: バックエンドデプロイ後に本番URLへ変更する
-// 例: "https://brightnews-backend.onrender.com"
-private let kBackendBaseURL = "https://YOUR_BACKEND_URL"
+private let kBackendBaseURL = "https://brightnewsbackend-production.up.railway.app"
 
 // MARK: - GNews 設定
 // 無料APIキー取得: https://gnews.io/ （無料: 100リクエスト/日）
@@ -11,12 +9,22 @@ private let kGNewsAPIKey = "689c5d5a2659169e3e846dd13d0837fd"
 private let kGNewsBaseURL = "https://gnews.io/api/v4"
 
 // MARK: - バックエンドAPIレスポンスモデル
-// GET /articles?category=テクノロジー のレスポンス
+// GET /api/v1/articles?category=テクノロジー&limit=50&offset=0
+
+private struct BackendPaginatedResponse: Codable {
+    let total:  Int
+    let limit:  Int
+    let offset: Int
+    let items:  [BackendArticleResponse]
+}
+
 private struct BackendArticleResponse: Codable {
-    let title:    String
-    let summary:  String
-    let category: String
-    let url:      String
+    let id:         Int
+    let title:      String
+    let summary:    String
+    let category:   String
+    let url:        String
+    let created_at: String
 }
 
 // MARK: - GNews APIレスポンスモデル
@@ -311,15 +319,15 @@ final class NewsService {
 
     // MARK: - Private: バックエンドAPI
 
-    /// kBackendBaseURL が placeholder でなければ true
+    /// kBackendBaseURL が接続可能な状態かチェック
     private var isBackendConfigured: Bool {
-        !kBackendBaseURL.contains("YOUR_BACKEND_URL")
+        !kBackendBaseURL.contains("YOUR_BACKEND_URL") && !kBackendBaseURL.isEmpty
     }
 
-    /// バックエンド GET /articles?category=xxx
+    /// バックエンド GET /api/v1/articles?category=xxx&limit=50
     /// - category nil → ホーム用（全件取得）
     private func fetchFromBackend(category: NewsCategory?) async -> [Article] {
-        var urlStr = "\(kBackendBaseURL)/articles?limit=50"
+        var urlStr = "\(kBackendBaseURL)/api/v1/articles?limit=50"
         if let cat = category, let backendCat = backendCategoryName(for: cat) {
             let encoded = backendCat.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? backendCat
             urlStr += "&category=\(encoded)"
@@ -328,12 +336,17 @@ final class NewsService {
         guard let (data, response) = try? await URLSession.shared.data(from: url),
               let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
 
-        let items = (try? JSONDecoder().decode([BackendArticleResponse].self, from: data)) ?? []
+        let paginated = (try? JSONDecoder().decode(BackendPaginatedResponse.self, from: data))
+        guard let items = paginated?.items else { return [] }
+
         return items.compactMap { item in
             guard !item.title.isEmpty, !item.url.isEmpty else { return nil }
-            let appCategory = category ?? appCategory(from: item.category)
-            // カテゴリ別フィルターを通す
-            guard passesFilter(item.title, for: appCategory) else { return nil }
+            let appCat = category ?? appCategory(from: item.category)
+            guard passesFilter(item.title, for: appCat) else { return nil }
+            // created_at: "2026-03-28T18:47:49.975749"（タイムゾーンなし）
+            let date = Self.backendDateFormatter.date(from: item.created_at)
+                    ?? ISO8601DateFormatter().date(from: item.created_at + "Z")
+                    ?? Date()
             return Article(
                 id:          UUID(),
                 title:       item.title,
@@ -342,33 +355,40 @@ final class NewsService {
                 imageURL:    "",
                 sourceURL:   item.url,
                 sourceName:  "BrightNews",
-                publishedAt: Date(),   // バックエンドが created_at を返す場合は後日対応
-                category:    appCategory
+                publishedAt: date,
+                category:    appCat
             )
         }
     }
+
+    private static let backendDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        return f
+    }()
 
     /// アプリカテゴリ → バックエンドカテゴリ名
     private func backendCategoryName(for category: NewsCategory) -> String? {
         switch category {
         case .technology:    return "テクノロジー"
         case .entertainment: return "エンタメ"
+        case .local:         return "ビジネス"
         case .health:        return "社会"
-        case .goodStory:     return "社会"
-        case .local:         return "社会"
-        case .healing:       return nil   // バックエンドに対応カテゴリなし → 全件取得
+        case .goodStory:     return nil   // goodStory は GNews 専用クエリで取得
+        case .healing:       return nil   // バックエンドに対応カテゴリなし
         case .sports:        return nil
         }
     }
 
-    /// バックエンドカテゴリ名 → アプリカテゴリ（ホームフィード用マッピング）
+    /// バックエンドカテゴリ名 → アプリカテゴリ（ホームフィード用）
     private func appCategory(from backendCategory: String) -> NewsCategory {
         switch backendCategory {
         case "テクノロジー": return .technology
         case "エンタメ":     return .entertainment
         case "ビジネス":     return .local
-        case "社会":         return .goodStory
-        default:             return .goodStory
+        case "社会":         return .local
+        default:             return .local
         }
     }
 
