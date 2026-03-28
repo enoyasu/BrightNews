@@ -373,11 +373,11 @@ final class NewsService {
         switch category {
         case .technology:    return "テクノロジー"
         case .entertainment: return "エンタメ"
-        case .local:         return "ビジネス"
-        case .health:        return "社会"
-        case .goodStory:     return nil   // goodStory は GNews 専用クエリで取得
-        case .healing:       return nil   // バックエンドに対応カテゴリなし
-        case .sports:        return nil
+        case .health:        return "医療・健康"
+        case .healing:       return "癒し"
+        case .sports:        return "スポーツ"
+        case .local:         return "地域ニュース"
+        case .goodStory:     return nil   // goodStory はバックエンドに未対応 → GNews専用
         }
     }
 
@@ -386,8 +386,10 @@ final class NewsService {
         switch backendCategory {
         case "テクノロジー": return .technology
         case "エンタメ":     return .entertainment
-        case "ビジネス":     return .local
-        case "社会":         return .local
+        case "医療・健康":   return .health
+        case "癒し":         return .healing
+        case "スポーツ":     return .sports
+        case "地域ニュース": return .local
         default:             return .local
         }
     }
@@ -508,17 +510,21 @@ final class NewsService {
         return !ngWords.contains { title.contains($0) }
     }
 
-    /// 「癒し」: 動物・自然・ペット・癒し系に特化。花粉・注意報・警報は除外。
+    /// 「癒し」: 動物・自然・ペット・癒し系に特化。花粉・注意報・警報・天気ニュースは除外。
     private func passesHealingFilter(_ title: String) -> Bool {
         let ngWords: [String] = [
             // アレルギー・注意報（癒しと逆効果）
             "花粉", "飛散", "注意報", "警報", "アレルギー", "発令",
+            // 天気・季節ニュース（花見日和など）
+            "花見", "お花見", "天気予報", "晴れ予報",
             // 自然災害
             "地震", "津波", "台風", "洪水", "噴火", "土砂崩れ",
             // 死亡・事件
             "遺体", "死亡", "殺人", "逮捕", "事故", "衝突",
             // 感染症
             "感染", "ウイルス",
+            // 政治・増税
+            "増税", "防衛費", "核燃料",
         ]
         return !ngWords.contains { title.contains($0) }
     }
