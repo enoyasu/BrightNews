@@ -98,6 +98,13 @@ struct HomeView: View {
         .onChange(of: purchaseService.isPremium) { _, _ in
             Task { await viewModel.refresh(isPremium: purchaseService.isPremium) }
         }
+        // 画面表示時に自動更新タイマー開始（5分ごとチェック・1時間で再取得）
+        .onAppear {
+            viewModel.startAutoRefresh(isPremium: purchaseService.isPremium)
+        }
+        .onDisappear {
+            viewModel.stopAutoRefresh()
+        }
     }
 }
 
@@ -108,10 +115,10 @@ private struct WelcomeBanner: View {
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
         switch hour {
-        case 5..<12:  return "おはようございます ☀️"
-        case 12..<17: return "こんにちは 🌞"
-        case 17..<21: return "こんにちは 🌆"
-        default:       return "お疲れさまでした 🌙"
+        case 5..<12:  return "おはようございます"
+        case 12..<17: return "こんにちは"
+        case 17..<21: return "こんにちは"
+        default:       return "お疲れさまでした"
         }
     }
 

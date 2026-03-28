@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 /// ホーム画面のViewModel
-/// 記事一覧の取得・無限スクロール・プルリフレッシュを管理
+/// 記事一覧の取得・無限スクロール・プルリフレッシュ・自動更新を管理
 @MainActor
 final class HomeViewModel: ObservableObject {
 
@@ -31,6 +31,8 @@ final class HomeViewModel: ObservableObject {
     private var currentPage: Int = 0
     private let maxPages: Int = 3
     private let newsService = NewsService.shared
+    /// 5分ごとにチェック、1時間経過していれば再取得
+    private var refreshTimer: AnyCancellable?
 
     // MARK: - Public Methods
 
@@ -72,6 +74,31 @@ final class HomeViewModel: ObservableObject {
 
     /// プルして更新
     func refresh(isPremium: Bool = false) async {
+        await loadArticles(isPremium: isPremium)
+    }
+
+    /// 自動更新タイマー開始（5分ごとにチェック、1時間経過で取得）
+    func startAutoRefresh(isPremium: Bool = false) {
+        guard refreshTimer == nil else { return }
+        refreshTimer = Timer.publish(every: 300, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    await self?.refreshIfNeeded(isPremium: isPremium)
+                }
+            }
+    }
+
+    /// 自動更新タイマー停止
+    func stopAutoRefresh() {
+        refreshTimer?.cancel()
+        refreshTimer = nil
+    }
+
+    // MARK: - Private: 自動更新
+
+    private func refreshIfNeeded(isPremium: Bool) async {
+        guard newsService.cacheExpired(forKey: "home") else { return }
         await loadArticles(isPremium: isPremium)
     }
 
