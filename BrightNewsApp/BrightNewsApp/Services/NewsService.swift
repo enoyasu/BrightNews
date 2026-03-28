@@ -1,8 +1,7 @@
 import Foundation
 
 // MARK: - GNews 設定
-// 無料APIキーの取得: https://gnews.io/ でアカウント作成（無料: 100リクエスト/日）
-// 本番リリース前にキーを設定してください
+// 無料APIキー取得: https://gnews.io/ （無料: 100リクエスト/日）
 private let kGNewsAPIKey = "689c5d5a2659169e3e846dd13d0837fd"
 private let kGNewsBaseURL = "https://gnews.io/api/v4"
 
@@ -34,15 +33,190 @@ enum NewsError: LocalizedError {
     case apiKeyNotSet
     case invalidURL
     case networkError(Int)
-    case decodingError
 
     var errorDescription: String? {
         switch self {
-        case .apiKeyNotSet:    return "APIキーが設定されていません。NewsService.swift の kGNewsAPIKey を設定してください"
-        case .invalidURL:      return "無効なURLです"
-        case .networkError(let code): return "ネットワークエラー (HTTP \(code))"
-        case .decodingError:   return "データの解析に失敗しました"
+        case .apiKeyNotSet:            return "APIキーが未設定です"
+        case .invalidURL:              return "無効なURLです"
+        case .networkError(let code):  return "ネットワークエラー (HTTP \(code))"
         }
+    }
+}
+
+// MARK: - RSSフィード定義
+
+private struct RSSFeed {
+    let urlString: String
+    let sourceName: String
+}
+
+/// カテゴリごとのRSSフィード
+/// - NHK: 公共放送（無制限、信頼性高）
+/// - ITmedia: 国内テック
+/// - Gigazine: テック・サイエンス・エンタメ
+/// - Yahoo Japan News: 各ジャンルの最新ニュース
+private let kRSSFeeds: [NewsCategory: [RSSFeed]] = [
+    .healing: [
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat2.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://gigazine.net/news/rss_2.0/",                 sourceName: "Gigazine"),
+        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/science.xml",    sourceName: "Yahoo!ニュース"),
+    ],
+    .technology: [
+        RSSFeed(urlString: "https://rss.itmedia.co.jp/rss/2.0/itmediamain.xml",  sourceName: "ITmedia"),
+        RSSFeed(urlString: "https://gigazine.net/news/rss_2.0/",                 sourceName: "Gigazine"),
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat2.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/it.xml",         sourceName: "Yahoo!ニュース"),
+    ],
+    .health: [
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat1.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/medical.xml",    sourceName: "Yahoo!ニュース"),
+    ],
+    .goodStory: [
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat0.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/domestic.xml",   sourceName: "Yahoo!ニュース"),
+    ],
+    .entertainment: [
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat2.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://gigazine.net/news/rss_2.0/",                 sourceName: "Gigazine"),
+        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/entertainment.xml", sourceName: "Yahoo!ニュース"),
+    ],
+    .sports: [
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat6.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/sports.xml",     sourceName: "Yahoo!ニュース"),
+    ],
+    .local: [
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat7.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat3.xml",           sourceName: "NHK"),
+        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/domestic.xml",   sourceName: "Yahoo!ニュース"),
+    ],
+]
+
+/// ホームフィード用RSS（全ジャンル混合）
+private let kHomeRSSFeeds: [RSSFeed] = [
+    RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat0.xml",           sourceName: "NHK"),
+    RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/top-picks.xml",  sourceName: "Yahoo!ニュース"),
+]
+
+// MARK: - RSSパーサー（Foundation XMLParser）
+
+private final class RSSParser: NSObject, XMLParserDelegate {
+
+    private let defaultSourceName: String
+    private(set) var items: [RSSParsedItem] = []
+
+    // 現在解析中アイテムの一時バッファ
+    private var inItem    = false
+    private var elemName  = ""
+    private var textBuf   = ""
+    private var title     = ""
+    private var link      = ""
+    private var desc      = ""
+    private var imageURL  = ""
+    private var pubDate   = ""
+
+    private static let rfc2822: DateFormatter = {
+        let f = DateFormatter()
+        f.locale     = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+        return f
+    }()
+
+    init(sourceName: String) {
+        self.defaultSourceName = sourceName
+    }
+
+    func parse(data: Data) -> [RSSParsedItem] {
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parser.parse()
+        return items
+    }
+
+    // MARK: XMLParserDelegate
+
+    func parser(_ parser: XMLParser, didStartElement name: String,
+                namespaceURI: String?, qualifiedName qName: String?,
+                attributes attrs: [String: String] = [:]) {
+        elemName = qName ?? name
+        textBuf  = ""
+
+        if name == "item" || name == "entry" {
+            inItem   = true
+            title    = ""; link = ""; desc = ""; imageURL = ""; pubDate = ""
+        }
+        guard inItem else { return }
+
+        // 画像URL取得（media:content / media:thumbnail / enclosure）
+        let q = qName ?? name
+        if (q == "media:content" || q == "media:thumbnail"), imageURL.isEmpty {
+            imageURL = attrs["url"] ?? ""
+        }
+        if q == "enclosure",
+           let url  = attrs["url"],
+           let type = attrs["type"], type.hasPrefix("image"),
+           imageURL.isEmpty {
+            imageURL = url
+        }
+        // Atom <link href="...">
+        if name == "link", let href = attrs["href"], link.isEmpty {
+            link = href
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        textBuf += string
+    }
+
+    func parser(_ parser: XMLParser, foundCDATA data: Data) {
+        if let s = String(data: data, encoding: .utf8) { textBuf += s }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement name: String,
+                namespaceURI: String?, qualifiedName qName: String?) {
+        guard inItem else { return }
+
+        let t = textBuf.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch name {
+        case "title":                          if title.isEmpty   { title   = t }
+        case "link":                           if link.isEmpty    { link    = t }
+        case "description", "summary":         if desc.isEmpty    { desc    = t }
+        case "pubDate", "published", "updated": if pubDate.isEmpty { pubDate = t }
+        case "item", "entry":
+            inItem = false
+            guard !title.isEmpty, !link.isEmpty else { return }
+            let date = Self.rfc2822.date(from: pubDate)
+                    ?? ISO8601DateFormatter().date(from: pubDate)
+                    ?? Date()
+            items.append(RSSParsedItem(
+                title:      title,
+                link:       link,
+                desc:       desc.strippingHTML(),
+                imageURL:   imageURL,
+                pubDate:    date,
+                sourceName: defaultSourceName
+            ))
+        default: break
+        }
+        textBuf = ""
+    }
+}
+
+private struct RSSParsedItem {
+    let title: String
+    let link:  String
+    let desc:  String
+    let imageURL:   String
+    let pubDate:    Date
+    let sourceName: String
+}
+
+// MARK: - String HTML除去ヘルパー
+
+private extension String {
+    func strippingHTML() -> String {
+        replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -53,88 +227,93 @@ final class NewsService {
     static let shared = NewsService()
     private init() {}
 
-    /// キャッシュ保持期間（秒）: 1時間
+    /// キャッシュ有効期間（1時間）
     private let cacheInterval: TimeInterval = 3600
-    /// データ保持期間（日）: 30日
+    /// データ保持期間（30日）
     private let retentionDays: Double = 30
 
     // MARK: - Public API
 
-    /// ホーム用：複数カテゴリをまとめて取得（キャッシュ対応）
+    /// ホーム用：GNews + RSS を並列取得してマージ
     func fetchAllArticles() async throws -> [Article] {
         let cached = loadCache(forKey: "home")
-        if !cached.isEmpty, !cacheExpired(forKey: "home") {
-            return cached
-        }
+        if !cached.isEmpty, !cacheExpired(forKey: "home") { return cached }
 
-        let homeCategories: [NewsCategory] = [.technology, .entertainment, .sports, .health]
         var results: [Article] = []
 
         await withTaskGroup(of: [Article].self) { group in
-            for category in homeCategories {
-                group.addTask { (try? await self.fetchFromAPI(category: category)) ?? [] }
+            // GNews（4カテゴリ）
+            let gnewsCategories: [NewsCategory] = [.technology, .entertainment, .sports, .health]
+            for cat in gnewsCategories {
+                group.addTask { (try? await self.fetchFromGNews(category: cat)) ?? [] }
             }
-            for await articles in group {
-                results.append(contentsOf: articles)
+            // ホーム用RSSフィード
+            for feed in kHomeRSSFeeds {
+                // ホームのRSS記事は最も近いカテゴリを自動判定
+                group.addTask { await self.fetchFromRSS(feed: feed, category: .goodStory) }
             }
+            for await articles in group { results.append(contentsOf: articles) }
         }
 
         guard !results.isEmpty else { throw NewsError.networkError(0) }
 
-        let sorted = results.sorted { $0.publishedAt > $1.publishedAt }
-        saveCache(sorted, forKey: "home")
-        return sorted
+        let merged = deduplicated(results).sorted { $0.publishedAt > $1.publishedAt }
+        saveCache(merged, forKey: "home")
+        return merged
     }
 
-    /// カテゴリ別記事を取得（キャッシュ対応）
+    /// カテゴリ別：GNews + カテゴリ専用RSSをマージ
     func fetchArticles(for category: NewsCategory) async throws -> [Article] {
         let key = category.rawValue
         let cached = loadCache(forKey: key)
-        if !cached.isEmpty, !cacheExpired(forKey: key) {
-            return cached
+        if !cached.isEmpty, !cacheExpired(forKey: key) { return cached }
+
+        var results: [Article] = []
+
+        await withTaskGroup(of: [Article].self) { group in
+            // GNews API
+            group.addTask { (try? await self.fetchFromGNews(category: category)) ?? [] }
+            // カテゴリ専用RSSフィード
+            for feed in (kRSSFeeds[category] ?? []) {
+                group.addTask { await self.fetchFromRSS(feed: feed, category: category) }
+            }
+            for await articles in group { results.append(contentsOf: articles) }
         }
 
-        let articles = try await fetchFromAPI(category: category)
-        saveCache(articles, forKey: key)
-        return articles
+        let merged = deduplicated(results).sorted { $0.publishedAt > $1.publishedAt }
+        saveCache(merged, forKey: key)
+        return merged
     }
 
-    /// 追加記事の取得（キャッシュからシャッフルして返す）
+    /// 追加記事（キャッシュからシャッフル）
     func fetchMoreArticles(page: Int) async throws -> [Article] {
-        return loadCache(forKey: "home").shuffled()
+        loadCache(forKey: "home").shuffled()
     }
 
-    // MARK: - Private: GNews API呼び出し
+    // MARK: - Private: GNews
 
-    private func fetchFromAPI(category: NewsCategory) async throws -> [Article] {
-        guard kGNewsAPIKey != "YOUR_GNEWS_API_KEY" else {
-            throw NewsError.apiKeyNotSet
-        }
-
-        guard let url = URL(string: endpoint(for: category)) else {
-            throw NewsError.invalidURL
-        }
+    private func fetchFromGNews(category: NewsCategory) async throws -> [Article] {
+        guard kGNewsAPIKey != "YOUR_GNEWS_API_KEY" else { throw NewsError.apiKeyNotSet }
+        guard let url = URL(string: gnewsEndpoint(for: category)) else { throw NewsError.invalidURL }
 
         let (data, response) = try await URLSession.shared.data(from: url)
-
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw NewsError.networkError(http.statusCode)
         }
 
         let decoded = try JSONDecoder().decode(GNewsResponse.self, from: data)
-        return decoded.articles.compactMap { convert($0, to: category) }
+        return decoded.articles.compactMap { convertGNews($0, to: category) }
     }
 
-    /// カテゴリ→GNews APIエンドポイントのマッピング（日本語記事のみ）
-    private func endpoint(for category: NewsCategory) -> String {
-        let token = kGNewsAPIKey
-        let max = 10
+    private func gnewsEndpoint(for category: NewsCategory) -> String {
+        let token  = kGNewsAPIKey
+        let max    = 10
         let locale = "lang=ja&country=jp"
 
         switch category {
         case .healing:
             let q = "動物 OR ペット OR 自然 OR 癒し OR 保護"
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "%E5%8B%95%E7%89%A9"
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "animals"
             return "\(kGNewsBaseURL)/search?q=\(q)&\(locale)&max=\(max)&token=\(token)"
         case .technology:
             return "\(kGNewsBaseURL)/top-headlines?category=technology&\(locale)&max=\(max)&token=\(token)"
@@ -142,7 +321,7 @@ final class NewsService {
             return "\(kGNewsBaseURL)/top-headlines?category=health&\(locale)&max=\(max)&token=\(token)"
         case .goodStory:
             let q = "ボランティア OR 感動 OR 善行 OR 支援 OR 親切"
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "%E6%84%9F%E5%8B%95"
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "inspiring"
             return "\(kGNewsBaseURL)/search?q=\(q)&\(locale)&max=\(max)&token=\(token)"
         case .entertainment:
             return "\(kGNewsBaseURL)/top-headlines?category=entertainment&\(locale)&max=\(max)&token=\(token)"
@@ -153,62 +332,82 @@ final class NewsService {
         }
     }
 
-    /// GNewsArticle → Articleモデルへの変換
-    private func convert(_ item: GNewsArticle, to category: NewsCategory) -> Article? {
+    private func convertGNews(_ item: GNewsArticle, to category: NewsCategory) -> Article? {
         guard !item.title.isEmpty, !item.url.isEmpty else { return nil }
-
         let date = ISO8601DateFormatter().date(from: item.publishedAt) ?? Date()
-
-        // GNews無料枠はcontentを "[N chars]" で打ち切る → 除去
-        let rawContent = item.content ?? item.description ?? ""
-        let cleanContent = rawContent.replacingOccurrences(
-            of: #" \[\d+ chars\]$"#,
-            with: "",
-            options: .regularExpression
-        )
-        let body = cleanContent.isEmpty ? (item.description ?? "") : cleanContent
+        let raw  = item.content ?? item.description ?? ""
+        let body = raw
+            .replacingOccurrences(of: #" \[\d+ chars\]$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return Article(
-            id: UUID(),
-            title: item.title,
-            summary: item.description ?? item.title,
-            content: body,
-            imageURL: item.image ?? "",
-            sourceURL: item.url,
-            sourceName: item.source.name,
+            id:          UUID(),
+            title:       item.title,
+            summary:     item.description ?? item.title,
+            content:     body.isEmpty ? (item.description ?? "") : body,
+            imageURL:    item.image ?? "",
+            sourceURL:   item.url,
+            sourceName:  item.source.name,
             publishedAt: date,
-            category: category
+            category:    category
         )
+    }
+
+    // MARK: - Private: RSS
+
+    private func fetchFromRSS(feed: RSSFeed, category: NewsCategory) async -> [Article] {
+        guard let url = URL(string: feed.urlString) else { return [] }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return [] }
+
+        let parser = RSSParser(sourceName: feed.sourceName)
+        return parser.parse(data: data).compactMap { item in
+            guard !item.title.isEmpty, !item.link.isEmpty else { return nil }
+            return Article(
+                id:          UUID(),
+                title:       item.title,
+                summary:     item.desc.isEmpty ? item.title : item.desc,
+                content:     item.desc,
+                imageURL:    item.imageURL,
+                sourceURL:   item.link,
+                sourceName:  item.sourceName,
+                publishedAt: item.pubDate,
+                category:    category
+            )
+        }
+    }
+
+    // MARK: - Private: 重複排除
+
+    private func deduplicated(_ articles: [Article]) -> [Article] {
+        var seen = Set<String>()
+        return articles.filter { seen.insert($0.sourceURL).inserted }
     }
 
     // MARK: - Private: キャッシュ管理
 
-    private func cacheKey(_ key: String)      -> String { "brightnews_cache_\(key)" }
-    private func cacheTimeKey(_ key: String)  -> String { "brightnews_cache_time_\(key)" }
+    private func cacheKey(_ k: String)     -> String { "brightnews_cache_\(k)" }
+    private func cacheTimeKey(_ k: String) -> String { "brightnews_cache_time_\(k)" }
 
-    /// キャッシュが期限切れかどうか（1時間）
     func cacheExpired(forKey key: String) -> Bool {
         let last = UserDefaults.standard.object(forKey: cacheTimeKey(key)) as? Date ?? .distantPast
         return Date().timeIntervalSince(last) >= cacheInterval
     }
 
-    /// キャッシュ読み込み（30日以内のみ返す）
     private func loadCache(forKey key: String) -> [Article] {
         guard let data = UserDefaults.standard.data(forKey: cacheKey(key)) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let all = (try? decoder.decode([Article].self, from: data)) ?? []
+        let all    = (try? decoder.decode([Article].self, from: data)) ?? []
         let cutoff = Date().addingTimeInterval(-retentionDays * 86400)
         return all.filter { $0.publishedAt >= cutoff }
     }
 
-    /// キャッシュ書き込み（30日以内のデータのみ保存）
     private func saveCache(_ articles: [Article], forKey key: String) {
         let cutoff = Date().addingTimeInterval(-retentionDays * 86400)
-        let valid = articles.filter { $0.publishedAt >= cutoff }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(valid) {
+        let valid  = articles.filter { $0.publishedAt >= cutoff }
+        let enc    = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        if let data = try? enc.encode(valid) {
             UserDefaults.standard.set(data, forKey: cacheKey(key))
             UserDefaults.standard.set(Date(), forKey: cacheTimeKey(key))
         }
