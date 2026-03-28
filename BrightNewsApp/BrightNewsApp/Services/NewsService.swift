@@ -71,10 +71,8 @@ private let kRSSFeeds: [NewsCategory: [RSSFeed]] = [
         RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat1.xml",           sourceName: "NHK"),
         RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/medical.xml",    sourceName: "Yahoo!ニュース"),
     ],
-    .goodStory: [
-        RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat0.xml",           sourceName: "NHK"),
-        RSSFeed(urlString: "https://news.yahoo.co.jp/rss/topics/domestic.xml",   sourceName: "Yahoo!ニュース"),
-    ],
+    // goodStory は全般ニュースRSSを使わず GNews 検索クエリのみで厳選取得
+    .goodStory: [],
     .entertainment: [
         RSSFeed(urlString: "https://www3.nhk.or.jp/rss/news/cat2.xml",           sourceName: "NHK"),
         RSSFeed(urlString: "https://gigazine.net/news/rss_2.0/",                 sourceName: "Gigazine"),
@@ -320,8 +318,10 @@ final class NewsService {
         case .health:
             return "\(kGNewsBaseURL)/top-headlines?category=health&\(locale)&max=\(max)&token=\(token)"
         case .goodStory:
-            let q = "ボランティア OR 感動 OR 善行 OR 支援 OR 親切"
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "inspiring"
+            // 人助け・善行・感動する話に特化したキーワードで検索
+            // 「支援」「増税」など政治・行政系が混入しやすいワードは除外
+            let q = "感動 OR 善行 OR ボランティア OR 人助け OR 優しさ OR 笑顔 OR 奇跡 OR 感謝 OR 寄付 OR 助け合い OR 救助 OR 心温まる"
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "heartwarming"
             return "\(kGNewsBaseURL)/search?q=\(q)&\(locale)&max=\(max)&token=\(token)"
         case .entertainment:
             return "\(kGNewsBaseURL)/top-headlines?category=entertainment&\(locale)&max=\(max)&token=\(token)"
@@ -334,23 +334,65 @@ final class NewsService {
 
     private func convertGNews(_ item: GNewsArticle, to category: NewsCategory) -> Article? {
         guard !item.title.isEmpty, !item.url.isEmpty else { return nil }
+
+        // goodStory は NGワードフィルターを通過した記事のみ採用
+        if category == .goodStory, !passesGoodStoryFilter(item.title) { return nil }
+
         let date = ISO8601DateFormatter().date(from: item.publishedAt) ?? Date()
-        let raw  = item.content ?? item.description ?? ""
-        let body = raw
-            .replacingOccurrences(of: #" \[\d+ chars\]$"#, with: "", options: .regularExpression)
+
+        // description: 記事の概要（タイトルと別のテキスト）
+        let desc = (item.description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = (!desc.isEmpty && desc != item.title) ? desc : item.title
+
+        // content: GNews は末尾に "[N chars]" を付けて截断する → 除去してdescと比較
+        let rawContent = (item.content ?? "")
+            .replacingOccurrences(of: #"\s*\[\d+ chars\]$"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // content が空・title と同一・desc と同一 なら desc を本文とする
+        let content: String
+        if rawContent.isEmpty || rawContent == item.title || rawContent == desc {
+            content = desc.isEmpty ? item.title : desc
+        } else {
+            content = rawContent
+        }
 
         return Article(
             id:          UUID(),
             title:       item.title,
-            summary:     item.description ?? item.title,
-            content:     body.isEmpty ? (item.description ?? "") : body,
+            summary:     summary,
+            content:     content,
             imageURL:    item.image ?? "",
             sourceURL:   item.url,
             sourceName:  item.source.name,
             publishedAt: date,
             category:    category
         )
+    }
+
+    // MARK: - Private: 「いい話」NGワードフィルター
+    /// タイトルに以下のキーワードが含まれる記事は「いい話」カテゴリから除外する。
+    /// アプリのコンセプト（人助け・善行・感動）を守るための最終防衛ライン。
+    private func passesGoodStoryFilter(_ title: String) -> Bool {
+        let ngWords: [String] = [
+            // 死亡・事件・事故
+            "遺体", "死体", "殺人", "殺害", "殺す", "自殺", "自死", "死亡", "行方不明", "失踪",
+            "逮捕", "容疑者", "犯罪", "詐欺", "強盗", "窃盗", "暴行", "傷害", "凶器",
+            // 紛争・軍事・政治危機
+            "戦争", "紛争", "武力", "攻撃", "爆発", "爆撃", "空爆", "ミサイル", "核",
+            "情勢", "緊張", "制裁", "侵攻", "占領",
+            "イラン", "北朝鮮", "ロシア", "ウクライナ", "パレスチナ", "ガザ",
+            // 経済・生活の悪化
+            "増税", "値上げ", "物価上昇", "インフレ", "倒産", "リストラ", "閉店", "破綻",
+            // 自然災害
+            "地震", "津波", "台風", "洪水", "噴火", "土砂崩れ",
+            // 感染症・疫病
+            "感染拡大", "パンデミック", "新型コロナ",
+            // 差別・ハラスメント
+            "差別", "ハラスメント", "虐待",
+            // 天気・季節（花見日和など無関係ニュースを除外）
+            "天気予報", "花見日和", "お花見", "晴れ予報",
+        ]
+        return !ngWords.contains { title.contains($0) }
     }
 
     // MARK: - Private: RSS
@@ -362,11 +404,15 @@ final class NewsService {
         let parser = RSSParser(sourceName: feed.sourceName)
         return parser.parse(data: data).compactMap { item in
             guard !item.title.isEmpty, !item.link.isEmpty else { return nil }
+            // goodStory は NGワードフィルターを通過した記事のみ採用
+            if category == .goodStory, !passesGoodStoryFilter(item.title) { return nil }
+            // summary: desc が空またはタイトルと同じなら title をそのまま使用
+            let summary = (!item.desc.isEmpty && item.desc != item.title) ? item.desc : item.title
             return Article(
                 id:          UUID(),
                 title:       item.title,
-                summary:     item.desc.isEmpty ? item.title : item.desc,
-                content:     item.desc,
+                summary:     summary,
+                content:     item.desc.isEmpty ? item.title : item.desc,
                 imageURL:    item.imageURL,
                 sourceURL:   item.link,
                 sourceName:  item.sourceName,
