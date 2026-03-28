@@ -3,7 +3,7 @@ import Foundation
 // MARK: - GNews 設定
 // 無料APIキーの取得: https://gnews.io/ でアカウント作成（無料: 100リクエスト/日）
 // 本番リリース前にキーを設定してください
-private let kGNewsAPIKey = "YOUR_GNEWS_API_KEY"
+private let kGNewsAPIKey = "689c5d5a2659169e3e846dd13d0837fd"
 private let kGNewsBaseURL = "https://gnews.io/api/v4"
 
 // MARK: - GNews APIレスポンスモデル
