@@ -12,6 +12,8 @@ struct ArticleDetailView: View {
 
     @Environment(\.openURL) private var openURL
     @State private var bookmarkScale: CGFloat = 1.0
+    @State private var fetchedBody: String = ""
+    @State private var isLoadingBody = false
 
     private var isFavorite: Bool {
         favoritesService.isFavorite(article)
@@ -80,12 +82,30 @@ struct ArticleDetailView: View {
                     .background(Color.brightPrimary.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                    // MARK: 本文
-                    Text(article.content)
-                        .font(.system(size: appSettings.fontSize.bodySize))
-                        .foregroundColor(.primary)
-                        .lineSpacing(9)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // MARK: 本文（API 概要 ＋ Web フェッチ全文）
+                    VStack(alignment: .leading, spacing: 12) {
+                        if isLoadingBody {
+                            HStack(spacing: 8) {
+                                ProgressView().scaleEffect(0.8)
+                                Text("記事本文を読み込み中…")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if !fetchedBody.isEmpty {
+                            Text(fetchedBody)
+                                .font(.system(size: appSettings.fontSize.bodySize))
+                                .foregroundColor(.primary)
+                                .lineSpacing(9)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            // フェッチ失敗 or 未実施 → API 提供のテキストを表示
+                            Text(article.content)
+                                .font(.system(size: appSettings.fontSize.bodySize))
+                                .foregroundColor(.primary)
+                                .lineSpacing(9)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
 
                     Divider()
 
@@ -136,6 +156,12 @@ struct ArticleDetailView: View {
                     BannerAdView()
                 }
             }
+        }
+        .task {
+            guard fetchedBody.isEmpty else { return }
+            isLoadingBody = true
+            fetchedBody = await NewsService.shared.fetchArticleBody(from: article.sourceURL)
+            isLoadingBody = false
         }
         .background(Color.brightBackground)
         .navigationBarTitleDisplayMode(.inline)

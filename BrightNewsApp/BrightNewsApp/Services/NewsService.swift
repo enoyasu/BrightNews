@@ -310,8 +310,9 @@ final class NewsService {
 
         switch category {
         case .healing:
-            let q = "動物 OR ペット OR 自然 OR 癒し OR 保護"
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "animals"
+            // 「自然」単体は花粉・災害・警報も拾うため除外。動物・ペット・保護活動に絞る
+            let q = "癒し OR ペット OR 保護犬 OR 保護猫 OR 野生動物 OR 動物 OR 自然景観 OR 温泉 OR 絶景"
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "healing"
             return "\(kGNewsBaseURL)/search?q=\(q)&\(locale)&max=\(max)&token=\(token)"
         case .technology:
             return "\(kGNewsBaseURL)/top-headlines?category=technology&\(locale)&max=\(max)&token=\(token)"
@@ -335,8 +336,8 @@ final class NewsService {
     private func convertGNews(_ item: GNewsArticle, to category: NewsCategory) -> Article? {
         guard !item.title.isEmpty, !item.url.isEmpty else { return nil }
 
-        // goodStory は NGワードフィルターを通過した記事のみ採用
-        if category == .goodStory, !passesGoodStoryFilter(item.title) { return nil }
+        // カテゴリ別NGワードフィルター
+        if !passesFilter(item.title, for: category) { return nil }
 
         let date = ISO8601DateFormatter().date(from: item.publishedAt) ?? Date()
 
@@ -369,9 +370,17 @@ final class NewsService {
         )
     }
 
-    // MARK: - Private: 「いい話」NGワードフィルター
-    /// タイトルに以下のキーワードが含まれる記事は「いい話」カテゴリから除外する。
-    /// アプリのコンセプト（人助け・善行・感動）を守るための最終防衛ライン。
+    // MARK: - Private: カテゴリ別NGワードフィルター
+
+    private func passesFilter(_ title: String, for category: NewsCategory) -> Bool {
+        switch category {
+        case .goodStory: return passesGoodStoryFilter(title)
+        case .healing:   return passesHealingFilter(title)
+        default:         return true
+        }
+    }
+
+    /// 「いい話」: 人助け・善行・感動する話のみ。一つでも混入するとコンセプト崩壊のため厳格に管理。
     private func passesGoodStoryFilter(_ title: String) -> Bool {
         let ngWords: [String] = [
             // 死亡・事件・事故
@@ -389,8 +398,23 @@ final class NewsService {
             "感染拡大", "パンデミック", "新型コロナ",
             // 差別・ハラスメント
             "差別", "ハラスメント", "虐待",
-            // 天気・季節（花見日和など無関係ニュースを除外）
-            "天気予報", "花見日和", "お花見", "晴れ予報",
+            // 天気・季節（無関係ニュース除外）
+            "天気予報", "花見日和", "お花見", "晴れ予報", "花粉", "飛散",
+        ]
+        return !ngWords.contains { title.contains($0) }
+    }
+
+    /// 「癒し」: 動物・自然・ペット・癒し系に特化。花粉・注意報・警報は除外。
+    private func passesHealingFilter(_ title: String) -> Bool {
+        let ngWords: [String] = [
+            // アレルギー・注意報（癒しと逆効果）
+            "花粉", "飛散", "注意報", "警報", "アレルギー", "発令",
+            // 自然災害
+            "地震", "津波", "台風", "洪水", "噴火", "土砂崩れ",
+            // 死亡・事件
+            "遺体", "死亡", "殺人", "逮捕", "事故", "衝突",
+            // 感染症
+            "感染", "ウイルス",
         ]
         return !ngWords.contains { title.contains($0) }
     }
@@ -404,8 +428,8 @@ final class NewsService {
         let parser = RSSParser(sourceName: feed.sourceName)
         return parser.parse(data: data).compactMap { item in
             guard !item.title.isEmpty, !item.link.isEmpty else { return nil }
-            // goodStory は NGワードフィルターを通過した記事のみ採用
-            if category == .goodStory, !passesGoodStoryFilter(item.title) { return nil }
+            // カテゴリ別NGワードフィルター
+            if !passesFilter(item.title, for: category) { return nil }
             // summary: desc が空またはタイトルと同じなら title をそのまま使用
             let summary = (!item.desc.isEmpty && item.desc != item.title) ? item.desc : item.title
             return Article(
@@ -421,6 +445,75 @@ final class NewsService {
             )
         }
     }
+
+    // MARK: - Public: 記事本文取得（詳細画面で遅延フェッチ）
+
+    /// 記事URLからHTMLを取得し、本文段落を抽出して返す。
+    /// 失敗時・ペイウォール等は空文字列を返す（既存のsummary/contentを表示し続ける）。
+    func fetchArticleBody(from urlString: String) async -> String {
+        // 同一URLの結果はメモリキャッシュで再利用
+        if let cached = bodyCache[urlString] { return cached }
+
+        guard let url = URL(string: urlString) else { return "" }
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        req.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return "" }
+
+        let html = String(data: data, encoding: .utf8)
+               ?? String(data: data, encoding: .shiftJIS)
+               ?? String(data: data, encoding: .japaneseEUC)
+               ?? ""
+        guard !html.isEmpty else { return "" }
+
+        let body = extractMainContent(from: html)
+        if !body.isEmpty { bodyCache[urlString] = body }
+        return body
+    }
+
+    /// <p> タグ本文抽出。script/style/nav/header/footer を除去してから処理。
+    private func extractMainContent(from html: String) -> String {
+        // 不要ブロックを先に除去
+        var text = html
+        for tag in ["script", "style", "nav", "header", "footer", "aside", "figure", "figcaption"] {
+            text = text.replacingOccurrences(
+                of: "<\(tag)[^>]*>[\\s\\S]*?</\(tag)>",
+                with: "",
+                options: .regularExpression
+            )
+        }
+
+        // <p> タグ本文を抽出
+        var paragraphs: [String] = []
+        let pattern = "<p[^>]*>([\\s\\S]*?)</p>"
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let r = Range(match.range(at: 1), in: text) else { continue }
+                let p = String(text[r])
+                    .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                    .replacingOccurrences(of: "&amp;",  with: "&")
+                    .replacingOccurrences(of: "&lt;",   with: "<")
+                    .replacingOccurrences(of: "&gt;",   with: ">")
+                    .replacingOccurrences(of: "&nbsp;", with: " ")
+                    .replacingOccurrences(of: "&#39;",  with: "'")
+                    .replacingOccurrences(of: "&quot;", with: "\"")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if p.count >= 30 { paragraphs.append(p) }
+            }
+        }
+
+        // 重複段落を除去し最大20段落
+        var seen = Set<String>()
+        let unique = paragraphs.filter { seen.insert($0).inserted }
+        return unique.prefix(20).joined(separator: "\n\n")
+    }
+
+    // 本文のメモリキャッシュ（アプリ起動中のみ有効）
+    private var bodyCache: [String: String] = [:]
 
     // MARK: - Private: 重複排除
 
