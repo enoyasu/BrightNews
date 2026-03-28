@@ -301,14 +301,14 @@ private struct BirdShape: View {
 
 private struct AppIconMiniView: View {
 
-    private let s: CGFloat  = 140   // アイコンサイズ
-    private let r: CGFloat  = 30    // 角丸半径
-    private let bandH: CGFloat = 140 * 0.44  // 青バンド高さ = 61.6
-
-    // 白エリアの高さ = 78.4。太陽中心Y = 白エリアの47% = 36.8
-    private var sunCY: CGFloat { s * 0.263 }      // = 36.8 ≈ top 37%
-    private var sunR: CGFloat  { s * 0.175 }      // = 24.5
-    private var bandTopY: CGFloat { s - bandH }   // = 78.4
+    private let s: CGFloat = 140    // アイコンサイズ
+    private let r: CGFloat = 30     // 角丸半径
+    // 青バンドは下部40%（= 56pt）、白エリアは上部60%（= 84pt）
+    private var bandH: CGFloat   { s * 0.40 }
+    private var bandTopY: CGFloat { s * 0.60 }
+    // 太陽中心：白エリア中央（s*0.30）、光線がアイコン上端から約9pt余白
+    private var sunCY: CGFloat   { s * 0.30 }
+    private var sunR: CGFloat    { s * 0.145 }  // 20.3pt
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -317,18 +317,18 @@ private struct AppIconMiniView: View {
             Color.white
                 .frame(width: s, height: s)
 
-            // ── 太陽（白エリア内、青バンドより下の光線は後で隠れる） ──
+            // ── 太陽（光線は青バンドで隠れる） ──
             ZStack {
                 // 光線8本
                 ForEach(0..<8) { i in
-                    let angle   = Double(i) * 45 - 90
-                    let innerR  = sunR * 1.28
-                    let outerR  = sunR * 1.72
-                    let midR    = (innerR + outerR) / 2
+                    let angle  = Double(i) * 45 - 90
+                    let innerR = sunR * 1.30
+                    let outerR = sunR * 1.72
+                    let midR   = (innerR + outerR) / 2
                     Rectangle()
                         .fill(Color(hue: 0.11, saturation: 0.65, brightness: 1.0))
-                        .frame(width: max(2, s * 0.036), height: outerR - innerR)
-                        .cornerRadius(s * 0.018)
+                        .frame(width: max(2, s * 0.034), height: outerR - innerR)
+                        .cornerRadius(s * 0.017)
                         .offset(y: -midR)
                         .rotationEffect(.degrees(angle + 90))
                 }
@@ -343,7 +343,7 @@ private struct AppIconMiniView: View {
             }
             .position(x: s * 0.5, y: sunCY)
 
-            // ── 青バンド（下部44%、太陽の下の光線を隠す） ──
+            // ── 青バンド（太陽下の光線を隠す） ──
             Color(hue: 0.55, saturation: 0.62, brightness: 0.90)
                 .frame(width: s, height: bandH)
                 .offset(y: bandTopY)

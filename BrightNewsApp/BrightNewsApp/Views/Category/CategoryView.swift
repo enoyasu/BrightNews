@@ -16,10 +16,15 @@ struct CategoryView: View {
 
                 // MARK: カテゴリグリッド
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("カテゴリを選んでください")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("カテゴリを選んでください")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.primary)
+                        Text("タップすると関連ニュースがこの画面の下に表示されます")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
 
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(NewsCategory.allCases) { category in
