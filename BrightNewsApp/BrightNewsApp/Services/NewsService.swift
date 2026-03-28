@@ -125,33 +125,31 @@ final class NewsService {
         return decoded.articles.compactMap { convert($0, to: category) }
     }
 
-    /// カテゴリ→GNews APIエンドポイントのマッピング
+    /// カテゴリ→GNews APIエンドポイントのマッピング（日本語記事のみ）
     private func endpoint(for category: NewsCategory) -> String {
         let token = kGNewsAPIKey
         let max = 10
+        let locale = "lang=ja&country=jp"
 
         switch category {
         case .healing:
-            // 動物・自然・感動系
-            let q = "animals OR rescue OR wildlife OR nature uplifting"
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "animals"
-            return "\(kGNewsBaseURL)/search?q=\(q)&lang=en&max=\(max)&token=\(token)"
+            let q = "動物 OR ペット OR 自然 OR 癒し OR 保護"
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "%E5%8B%95%E7%89%A9"
+            return "\(kGNewsBaseURL)/search?q=\(q)&\(locale)&max=\(max)&token=\(token)"
         case .technology:
-            return "\(kGNewsBaseURL)/top-headlines?category=technology&lang=en&max=\(max)&token=\(token)"
+            return "\(kGNewsBaseURL)/top-headlines?category=technology&\(locale)&max=\(max)&token=\(token)"
         case .health:
-            return "\(kGNewsBaseURL)/top-headlines?category=health&lang=en&max=\(max)&token=\(token)"
+            return "\(kGNewsBaseURL)/top-headlines?category=health&\(locale)&max=\(max)&token=\(token)"
         case .goodStory:
-            // ボランティア・善行・感動
-            let q = "volunteer OR inspiring OR heartwarming OR good news"
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "inspiring"
-            return "\(kGNewsBaseURL)/search?q=\(q)&lang=en&max=\(max)&token=\(token)"
+            let q = "ボランティア OR 感動 OR 善行 OR 支援 OR 親切"
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "%E6%84%9F%E5%8B%95"
+            return "\(kGNewsBaseURL)/search?q=\(q)&\(locale)&max=\(max)&token=\(token)"
         case .entertainment:
-            return "\(kGNewsBaseURL)/top-headlines?category=entertainment&lang=en&max=\(max)&token=\(token)"
+            return "\(kGNewsBaseURL)/top-headlines?category=entertainment&\(locale)&max=\(max)&token=\(token)"
         case .sports:
-            return "\(kGNewsBaseURL)/top-headlines?category=sports&lang=en&max=\(max)&token=\(token)"
+            return "\(kGNewsBaseURL)/top-headlines?category=sports&\(locale)&max=\(max)&token=\(token)"
         case .local:
-            // 日本の国内ニュース
-            return "\(kGNewsBaseURL)/top-headlines?category=nation&lang=ja&country=jp&max=\(max)&token=\(token)"
+            return "\(kGNewsBaseURL)/top-headlines?category=nation&\(locale)&max=\(max)&token=\(token)"
         }
     }
 
