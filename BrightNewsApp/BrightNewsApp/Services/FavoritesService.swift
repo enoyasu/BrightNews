@@ -12,6 +12,7 @@ final class FavoritesService: ObservableObject {
 
     init() {
         loadFavorites()
+        purgeExpiredFavorites()
     }
 
     // MARK: - Public API
@@ -32,6 +33,16 @@ final class FavoritesService: ObservableObject {
     }
 
     // MARK: - Private
+
+    /// 30日以上前の記事をお気に入りから自動削除
+    private func purgeExpiredFavorites() {
+        let cutoff = Date().addingTimeInterval(-30 * 86400)
+        let before = favorites.count
+        favorites = favorites.filter { $0.publishedAt >= cutoff }
+        if favorites.count != before {
+            saveFavorites()
+        }
+    }
 
     /// お気に入りを UserDefaults に保存
     private func saveFavorites() {
