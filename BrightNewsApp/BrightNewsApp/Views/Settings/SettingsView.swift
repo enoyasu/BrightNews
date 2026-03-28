@@ -190,15 +190,15 @@ struct SettingsView: View {
                 HStack {
                     Label("開発者", systemImage: "person.fill")
                     Spacer()
-                    Text("BrightNews Team")
+                    Text("Novelo Studio")
                         .foregroundColor(.secondary)
                 }
 
-                Link(destination: URL(string: "https://enoyasu.github.io/BrightNews/legal/privacy_policy.html")!) {
+                Link(destination: URL(string: "https://novelostudio.github.io/legal/brightnews/privacy_policy.html")!) {
                     Label("プライバシーポリシー", systemImage: "lock.shield.fill")
                 }
 
-                Link(destination: URL(string: "https://enoyasu.github.io/BrightNews/legal/terms_of_service.html")!) {
+                Link(destination: URL(string: "https://novelostudio.github.io/legal/brightnews/terms_of_service.html")!) {
                     Label("利用規約", systemImage: "doc.text.fill")
                 }
 
