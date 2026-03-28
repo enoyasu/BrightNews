@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// BrightNewsアプリ専用カラーパレット拡張
 extension Color {
@@ -6,8 +7,14 @@ extension Color {
     /// プライマリカラー：温かみのあるサンシャインオレンジ
     static let brightPrimary = Color(red: 1.0, green: 0.58, blue: 0.18)
 
-    /// アプリ背景色：ソフトクリーム（目に優しい）
-    static let brightBackground = Color(red: 0.97, green: 0.95, blue: 0.93)
+    /// アプリ背景色：ライト=ソフトクリーム / ダーク=システム背景（自動対応）
+    static var brightBackground: Color {
+        Color(UIColor(dynamicProvider: { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor.systemBackground
+                : UIColor(red: 0.97, green: 0.95, blue: 0.93, alpha: 1)
+        }))
+    }
 
     /// カード背景色：システム背景（ダークモード自動対応）
     static var brightCard: Color { Color(.systemBackground) }
