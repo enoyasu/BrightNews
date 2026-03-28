@@ -1,9 +1,23 @@
 import Foundation
 
+// MARK: - バックエンドAPI設定
+// TODO: バックエンドデプロイ後に本番URLへ変更する
+// 例: "https://brightnews-backend.onrender.com"
+private let kBackendBaseURL = "https://YOUR_BACKEND_URL"
+
 // MARK: - GNews 設定
 // 無料APIキー取得: https://gnews.io/ （無料: 100リクエスト/日）
 private let kGNewsAPIKey = "689c5d5a2659169e3e846dd13d0837fd"
 private let kGNewsBaseURL = "https://gnews.io/api/v4"
+
+// MARK: - バックエンドAPIレスポンスモデル
+// GET /articles?category=テクノロジー のレスポンス
+private struct BackendArticleResponse: Codable {
+    let title:    String
+    let summary:  String
+    let category: String
+    let url:      String
+}
 
 // MARK: - GNews APIレスポンスモデル
 
@@ -232,7 +246,7 @@ final class NewsService {
 
     // MARK: - Public API
 
-    /// ホーム用：GNews + RSS を並列取得してマージ
+    /// ホーム用：バックエンド（優先）+ GNews + RSS を並列取得してマージ
     func fetchAllArticles() async throws -> [Article] {
         let cached = loadCache(forKey: "home")
         if !cached.isEmpty, !cacheExpired(forKey: "home") { return cached }
@@ -240,6 +254,10 @@ final class NewsService {
         var results: [Article] = []
 
         await withTaskGroup(of: [Article].self) { group in
+            // バックエンドAPI（URL設定済みの場合のみ）
+            if isBackendConfigured {
+                group.addTask { await self.fetchFromBackend(category: nil) }
+            }
             // GNews（4カテゴリ）
             let gnewsCategories: [NewsCategory] = [.technology, .entertainment, .sports, .health]
             for cat in gnewsCategories {
@@ -247,7 +265,6 @@ final class NewsService {
             }
             // ホーム用RSSフィード
             for feed in kHomeRSSFeeds {
-                // ホームのRSS記事は最も近いカテゴリを自動判定
                 group.addTask { await self.fetchFromRSS(feed: feed, category: .goodStory) }
             }
             for await articles in group { results.append(contentsOf: articles) }
@@ -260,7 +277,7 @@ final class NewsService {
         return merged
     }
 
-    /// カテゴリ別：GNews + カテゴリ専用RSSをマージ
+    /// カテゴリ別：バックエンド（優先）+ GNews + RSS をマージ
     func fetchArticles(for category: NewsCategory) async throws -> [Article] {
         let key = category.rawValue
         let cached = loadCache(forKey: key)
@@ -269,6 +286,10 @@ final class NewsService {
         var results: [Article] = []
 
         await withTaskGroup(of: [Article].self) { group in
+            // バックエンドAPI（URL設定済みの場合のみ）
+            if isBackendConfigured {
+                group.addTask { await self.fetchFromBackend(category: category) }
+            }
             // GNews API
             group.addTask { (try? await self.fetchFromGNews(category: category)) ?? [] }
             // カテゴリ専用RSSフィード
@@ -286,6 +307,69 @@ final class NewsService {
     /// 追加記事（キャッシュからシャッフル）
     func fetchMoreArticles(page: Int) async throws -> [Article] {
         loadCache(forKey: "home").shuffled()
+    }
+
+    // MARK: - Private: バックエンドAPI
+
+    /// kBackendBaseURL が placeholder でなければ true
+    private var isBackendConfigured: Bool {
+        !kBackendBaseURL.contains("YOUR_BACKEND_URL")
+    }
+
+    /// バックエンド GET /articles?category=xxx
+    /// - category nil → ホーム用（全件取得）
+    private func fetchFromBackend(category: NewsCategory?) async -> [Article] {
+        var urlStr = "\(kBackendBaseURL)/articles?limit=50"
+        if let cat = category, let backendCat = backendCategoryName(for: cat) {
+            let encoded = backendCat.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? backendCat
+            urlStr += "&category=\(encoded)"
+        }
+        guard let url = URL(string: urlStr) else { return [] }
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
+
+        let items = (try? JSONDecoder().decode([BackendArticleResponse].self, from: data)) ?? []
+        return items.compactMap { item in
+            guard !item.title.isEmpty, !item.url.isEmpty else { return nil }
+            let appCategory = category ?? appCategory(from: item.category)
+            // カテゴリ別フィルターを通す
+            guard passesFilter(item.title, for: appCategory) else { return nil }
+            return Article(
+                id:          UUID(),
+                title:       item.title,
+                summary:     item.summary,
+                content:     item.summary,
+                imageURL:    "",
+                sourceURL:   item.url,
+                sourceName:  "BrightNews",
+                publishedAt: Date(),   // バックエンドが created_at を返す場合は後日対応
+                category:    appCategory
+            )
+        }
+    }
+
+    /// アプリカテゴリ → バックエンドカテゴリ名
+    private func backendCategoryName(for category: NewsCategory) -> String? {
+        switch category {
+        case .technology:    return "テクノロジー"
+        case .entertainment: return "エンタメ"
+        case .health:        return "社会"
+        case .goodStory:     return "社会"
+        case .local:         return "社会"
+        case .healing:       return nil   // バックエンドに対応カテゴリなし → 全件取得
+        case .sports:        return nil
+        }
+    }
+
+    /// バックエンドカテゴリ名 → アプリカテゴリ（ホームフィード用マッピング）
+    private func appCategory(from backendCategory: String) -> NewsCategory {
+        switch backendCategory {
+        case "テクノロジー": return .technology
+        case "エンタメ":     return .entertainment
+        case "ビジネス":     return .local
+        case "社会":         return .goodStory
+        default:             return .goodStory
+        }
     }
 
     // MARK: - Private: GNews
