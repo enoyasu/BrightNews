@@ -306,8 +306,8 @@ private struct AppIconMiniView: View {
     // 青バンドは下部40%（= 56pt）、白エリアは上部60%（= 84pt）
     private var bandH: CGFloat   { s * 0.40 }
     private var bandTopY: CGFloat { s * 0.60 }
-    // 太陽中心：白エリア中央（s*0.30）、光線がアイコン上端から約9pt余白
-    private var sunCY: CGFloat   { s * 0.30 }
+    // 太陽中心：s*0.35（上下に余白を均等確保）
+    private var sunCY: CGFloat   { s * 0.35 }
     private var sunR: CGFloat    { s * 0.145 }  // 20.3pt
 
     var body: some View {
