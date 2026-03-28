@@ -1,5 +1,4 @@
 import SwiftUI
-import SafariServices
 
 /// 記事詳細画面
 /// ヒーロー画像・本文・元記事リンク・シェア・お気に入りを提供
@@ -11,7 +10,7 @@ struct ArticleDetailView: View {
     @EnvironmentObject var appSettings: AppSettings
     @EnvironmentObject var purchaseService: PurchaseService
 
-    @State private var showSafari = false
+    @Environment(\.openURL) private var openURL
     @State private var bookmarkScale: CGFloat = 1.0
 
     private var isFavorite: Bool {
@@ -93,10 +92,10 @@ struct ArticleDetailView: View {
                     // MARK: アクションボタン
                     VStack(spacing: 12) {
 
-                        // 元記事を読む（SFSafariViewController）
+                        // 元記事を読む（デバイスのデフォルトブラウザで開く）
                         if let url = URL(string: article.sourceURL) {
                             Button {
-                                showSafari = true
+                                openURL(url)
                             } label: {
                                 Label("元記事を読む", systemImage: "safari.fill")
                                     .font(.body.weight(.semibold))
@@ -105,10 +104,6 @@ struct ArticleDetailView: View {
                                     .padding()
                                     .background(Color.brightPrimary)
                                     .clipShape(RoundedRectangle(cornerRadius: 14))
-                            }
-                            .sheet(isPresented: $showSafari) {
-                                SafariView(url: url)
-                                    .ignoresSafeArea()
                             }
                         }
 
