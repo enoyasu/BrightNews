@@ -1,4 +1,85 @@
 import SwiftUI
+import WebKit
+
+// MARK: - WKBodyFetcher
+/// WKWebView（JavaScript有効）でページ本文を取得するヘルパー
+/// URLSessionで空だったJS依存サイト（Yahoo Newsなど）に使用
+@MainActor
+private final class WKBodyFetcher: NSObject, WKNavigationDelegate {
+
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<String, Never>?
+    private var jsTimer: Task<Void, Never>?
+
+    func fetch(from urlString: String) async -> String {
+        guard let url = URL(string: urlString) else { return "" }
+
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+
+            let config = WKWebViewConfiguration()
+            config.preferences.javaScriptEnabled = true
+            // バックグラウンドでレンダリング（画面非表示）
+            let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844),
+                               configuration: config)
+            wv.navigationDelegate = self
+            wv.load(URLRequest(url: url))
+            self.webView = wv
+
+            // 15秒タイムアウト
+            jsTimer = Task {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                self.finish(with: "")
+            }
+        }
+    }
+
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor in
+            // JS レンダリング待ち 1.5秒
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await self.extractText(from: webView)
+        }
+    }
+
+    nonisolated func webView(_ webView: WKWebView,
+                             didFail navigation: WKNavigation!,
+                             withError error: Error) {
+        Task { @MainActor in self.finish(with: "") }
+    }
+
+    nonisolated func webView(_ webView: WKWebView,
+                             didFailProvisionalNavigation navigation: WKNavigation!,
+                             withError error: Error) {
+        Task { @MainActor in self.finish(with: "") }
+    }
+
+    private func extractText(from webView: WKWebView) async {
+        let js = """
+        (function() {
+            var paragraphs = document.querySelectorAll('p');
+            var texts = [];
+            for (var i = 0; i < paragraphs.length; i++) {
+                var t = paragraphs[i].innerText.trim();
+                if (t.length > 20) texts.push(t);
+            }
+            return texts.join('\\n\\n');
+        })()
+        """
+        let result = try? await webView.evaluateJavaScript(js)
+        let text = (result as? String) ?? ""
+        finish(with: text)
+    }
+
+    private func finish(with text: String) {
+        jsTimer?.cancel()
+        jsTimer = nil
+        webView?.navigationDelegate = nil
+        webView = nil
+        continuation?.resume(returning: text)
+        continuation = nil
+    }
+}
 
 /// 記事詳細画面
 /// ヒーロー画像・本文・元記事リンク・シェア・お気に入りを提供
@@ -173,7 +254,13 @@ struct ArticleDetailView: View {
         .task {
             guard fetchedBody.isEmpty else { return }
             isLoadingBody = true
-            fetchedBody = await NewsService.shared.fetchArticleBody(from: article.sourceURL)
+            // まず URLSession で高速取得
+            var body = await NewsService.shared.fetchArticleBody(from: article.sourceURL)
+            // 空の場合は WKWebView（JS有効）でフォールバック取得
+            if body.isEmpty {
+                body = await WKBodyFetcher().fetch(from: article.sourceURL)
+            }
+            fetchedBody = body
             isLoadingBody = false
         }
         .background(Color.brightBackground)
