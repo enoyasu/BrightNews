@@ -581,9 +581,35 @@ final class NewsService {
                ?? ""
         guard !html.isEmpty else { return "" }
 
+        // JS必須サイト（SPA）はHTMLだけでは本文が取れないため空文字を返す
+        // → ArticleDetailView で article.summary にフォールバックされる
+        if isJavaScriptRequiredPage(html) { return "" }
+
         let body = extractMainContent(from: html)
         if !body.isEmpty { bodyCache[urlString] = body }
         return body
+    }
+
+    /// JS が必要な SPA ページかどうかを判定する
+    private func isJavaScriptRequiredPage(_ html: String) -> Bool {
+        let ngPhrases = [
+            "JavaScriptを有効",
+            "JavaScript を有効",
+            "javascript is not enabled",
+            "enable javascript",
+            "Enable JavaScript",
+            "please enable javascript",
+            "requires javascript",
+            "This site requires JavaScript",
+            "noscript",          // <noscript> のみのページ
+            "ブラウザの設定でJavaScript",
+            "お使いのブラウザではJavaScript",
+        ]
+        let lower = html.lowercased()
+        // NGフレーズに加え、<p>タグが5個未満かつbody全体が短い場合もSPAと判定
+        let hasNGPhrase = ngPhrases.contains { html.contains($0) || lower.contains($0.lowercased()) }
+        let isTooShort = html.count < 2000 && !html.contains("</article>")
+        return hasNGPhrase || isTooShort
     }
 
     /// <p> タグ本文抽出。script/style/nav/header/footer を除去してから処理。
