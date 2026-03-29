@@ -26,7 +26,9 @@ struct HomeView: View {
                         message: errorMessage,
                         actionTitle: "もう一度試す"
                     ) {
-                        Task { await viewModel.loadArticles() }
+                        Task {
+                            await viewModel.loadArticles(isPremium: purchaseService.isPremium)
+                        }
                     }
                     .padding(.top, 40)
                 } else {

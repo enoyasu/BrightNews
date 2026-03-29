@@ -11,6 +11,10 @@ struct SettingsView: View {
 
     @State private var showPremium = false
 
+    private let privacyPolicyURL = URL(string: "https://novelostudio.github.io/legal/brightnews/privacy_policy.html")
+    private let termsOfServiceURL = URL(string: "https://novelostudio.github.io/legal/brightnews/terms_of_service.html")
+    private let appStoreDeveloperURL = URL(string: "https://apps.apple.com/jp/developer/brightnews")
+
     // 通知時刻の一時保存（DatePicker用）
     @State private var notificationTime: Date = {
         var components = DateComponents()
@@ -194,18 +198,24 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Link(destination: URL(string: "https://novelostudio.github.io/legal/brightnews/privacy_policy.html")!) {
-                    Label("プライバシーポリシー", systemImage: "lock.shield.fill")
+                if let privacyPolicyURL {
+                    Link(destination: privacyPolicyURL) {
+                        Label("プライバシーポリシー", systemImage: "lock.shield.fill")
+                    }
                 }
 
-                Link(destination: URL(string: "https://novelostudio.github.io/legal/brightnews/terms_of_service.html")!) {
-                    Label("利用規約", systemImage: "doc.text.fill")
+                if let termsOfServiceURL {
+                    Link(destination: termsOfServiceURL) {
+                        Label("利用規約", systemImage: "doc.text.fill")
+                    }
                 }
 
                 // TODO: App Store公開後にAppIDを含む正式URLへ変更してください
                 // 例: https://apps.apple.com/jp/app/brightnews/id000000000
-                Link(destination: URL(string: "https://apps.apple.com/jp/developer/brightnews")!) {
-                    Label("App Storeでレビューする", systemImage: "star.fill")
+                if let appStoreDeveloperURL {
+                    Link(destination: appStoreDeveloperURL) {
+                        Label("App Storeでレビューする", systemImage: "star.fill")
+                    }
                 }
             }
 
