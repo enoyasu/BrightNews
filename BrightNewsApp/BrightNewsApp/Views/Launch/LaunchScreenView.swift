@@ -60,14 +60,18 @@ struct LaunchScreenView: View {
                     let elapsed = tl.date.timeIntervalSinceReferenceDate
                     // 0.55秒周期でフラップ（sin: -1→+1→-1 の滑らかな繰り返し）
                     let flap = sin(elapsed * .pi * 2.0 / 0.55)
+                    // 小さな上下揺れを入れて、飛行感を強化
+                    let bob = sin(elapsed * .pi * 2.0 / 0.9)
                     BirdShape(wingFlap: flap)
+                        .opacity(birdOpacity)
+                        .position(
+                            x: w * birdX,
+                            y: horizonY - h * 0.20
+                               - sin(birdArc * .pi) * h * 0.05
+                               + CGFloat(bob) * h * 0.012
+                        )
+                        .scaleEffect(0.85 + birdArc * 0.15)
                 }
-                .opacity(birdOpacity)
-                .position(
-                    x: w * birdX,
-                    y: horizonY - h * 0.20 - sin(birdArc * .pi) * h * 0.06
-                )
-                .scaleEffect(0.85 + birdArc * 0.15)
 
                 // ⑤ 白フェード
                 Color.white.opacity(whiteAlpha).ignoresSafeArea()
@@ -84,7 +88,7 @@ struct LaunchScreenView: View {
     // MARK: - 太陽Y座標
 
     private func sunCenterY(horizonY: CGFloat, h: CGFloat) -> CGFloat {
-        horizonY - CGFloat(sunRise) * h * 0.30
+        horizonY - CGFloat(sunRise) * h * 0.38
     }
 
     // MARK: - サブビュー
@@ -94,9 +98,9 @@ struct LaunchScreenView: View {
         LinearGradient(
             stops: [
                 .init(color: Color(hue: 0.60, saturation: 0.55 - bright * 0.30, brightness: 0.35 + bright * 0.50), location: 0.0),
-                .init(color: Color(hue: 0.55, saturation: 0.45 - bright * 0.25, brightness: 0.60 + bright * 0.35), location: 0.45),
-                .init(color: Color(hue: 0.09, saturation: 0.40 + bright * 0.30, brightness: 0.75 + bright * 0.20), location: 0.75),
-                .init(color: Color(hue: 0.08, saturation: 0.50 + bright * 0.25, brightness: 0.85 + bright * 0.10), location: 1.0),
+                .init(color: Color(hue: 0.56, saturation: 0.42 - bright * 0.22, brightness: 0.60 + bright * 0.34), location: 0.45),
+                .init(color: Color(hue: 0.54, saturation: 0.30 - bright * 0.14, brightness: 0.78 + bright * 0.16), location: 0.75),
+                .init(color: Color(hue: 0.53, saturation: 0.20 - bright * 0.10, brightness: 0.90 + bright * 0.08), location: 1.0),
             ],
             startPoint: .top, endPoint: .bottom
         )
@@ -147,16 +151,17 @@ struct LaunchScreenView: View {
 
     @ViewBuilder
     private func seaView(horizonY: CGFloat, phase: Double, w: CGFloat, h: CGFloat) -> some View {
+        let tideOffset = CGFloat(sin(phase * 0.55)) * 2.5
         ZStack {
             LinearGradient(
                 colors: [Color(hue: 0.57, saturation: 0.65, brightness: 0.70),
                          Color(hue: 0.56, saturation: 0.70, brightness: 0.50)],
                 startPoint: .top, endPoint: .bottom
             )
-            .mask(seaShape(y: horizonY, phase: phase, amplitude: 6, w: w, h: h))
-            seaShape(y: horizonY + 5, phase: phase + 0.8, amplitude: 4, w: w, h: h)
+            .mask(seaShape(y: horizonY + tideOffset, phase: phase, amplitude: 8, w: w, h: h))
+            seaShape(y: horizonY + tideOffset + 6, phase: phase + 0.8, amplitude: 5, w: w, h: h)
                 .fill(Color.white.opacity(0.18))
-            seaReflection(horizonY: horizonY, phase: phase, w: w)
+            seaReflection(horizonY: horizonY + tideOffset, phase: phase, w: w)
         }
     }
 
@@ -178,11 +183,12 @@ struct LaunchScreenView: View {
     @ViewBuilder
     private func seaReflection(horizonY: CGFloat, phase: Double, w: CGFloat) -> some View {
         ForEach(0..<5) { i in
-            let xBase = CGFloat(i) * w * 0.22 + CGFloat(sin(phase + Double(i))) * 15
+            let xBase = CGFloat(i) * w * 0.22 + CGFloat(sin(phase + Double(i))) * 18
+            let yBase = horizonY + 12 + CGFloat(i * 5) + CGFloat(cos(phase * 1.2 + Double(i))) * 1.6
             Capsule()
                 .fill(Color.white.opacity(0.22))
                 .frame(width: CGFloat(20 + i * 8), height: 3)
-                .position(x: xBase + w * 0.08, y: horizonY + 12 + CGFloat(i * 5))
+                .position(x: xBase + w * 0.08, y: yBase)
         }
     }
 
