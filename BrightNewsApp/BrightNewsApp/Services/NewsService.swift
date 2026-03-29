@@ -2,6 +2,7 @@ import Foundation
 
 // MARK: - バックエンドAPI設定
 private let kBackendBaseURL = "https://brightnewsbackend-production.up.railway.app"
+private let kDirectFallbackFlagKey = "brightnews.enable_direct_fallback"
 
 // MARK: - GNews 設定
 // 無料APIキー取得: https://gnews.io/ （無料: 100リクエスト/日）
@@ -21,7 +22,8 @@ private struct BackendPaginatedResponse: Codable {
 private struct BackendArticleResponse: Codable {
     let id:         Int
     let title:      String
-    let summary:    String
+    let content:    String?
+    let summary:    String?
     let category:   String
     let url:        String
     let image_url:  String?
@@ -252,65 +254,70 @@ final class NewsService {
     private let cacheInterval: TimeInterval = 3600
     /// データ保持期間（30日）
     private let retentionDays: Double = 30
+    private let enableDirectFallback: Bool = {
+        if ProcessInfo.processInfo.environment["BRIGHTNEWS_ENABLE_DIRECT_FALLBACK"] == "1" {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: kDirectFallbackFlagKey)
+    }()
 
     // MARK: - Public API
 
-    /// ホーム用：バックエンド（優先）+ GNews + RSS を並列取得してマージ
+    /// ホーム用：通常はバックエンドのみ。疎通失敗時のみ direct fallback を許可。
     func fetchAllArticles() async throws -> [Article] {
         let cached = loadCache(forKey: "home")
         if !cached.isEmpty, !cacheExpired(forKey: "home") { return cached }
 
-        var results: [Article] = []
-
-        await withTaskGroup(of: [Article].self) { group in
-            // バックエンドAPI（URL設定済みの場合のみ）
-            if isBackendConfigured {
-                group.addTask { await self.fetchFromBackend(category: nil) }
+        if isBackendConfigured {
+            do {
+                let backendArticles = try await fetchFromBackend(category: nil)
+                saveCache(backendArticles, forKey: "home")
+                return backendArticles
+            } catch {
+                log("Backend home fetch failed: \(error.localizedDescription)")
+                if !enableDirectFallback {
+                    throw error
+                }
+                log("Direct fallback enabled, using GNews/RSS for home feed")
+                let fallbackArticles = try await fetchHomeFallbackArticles()
+                saveCache(fallbackArticles, forKey: "home")
+                return fallbackArticles
             }
-            // GNews（4カテゴリ）
-            let gnewsCategories: [NewsCategory] = [.technology, .entertainment, .sports, .health]
-            for cat in gnewsCategories {
-                group.addTask { (try? await self.fetchFromGNews(category: cat)) ?? [] }
-            }
-            // ホーム用RSSフィード
-            for feed in kHomeRSSFeeds {
-                group.addTask { await self.fetchFromRSS(feed: feed, category: .goodStory) }
-            }
-            for await articles in group { results.append(contentsOf: articles) }
         }
 
-        guard !results.isEmpty else { throw NewsError.networkError(0) }
-
-        let merged = deduplicated(results).sorted { $0.publishedAt > $1.publishedAt }
-        saveCache(merged, forKey: "home")
-        return merged
+        guard enableDirectFallback else { throw NewsError.networkError(0) }
+        let fallbackArticles = try await fetchHomeFallbackArticles()
+        saveCache(fallbackArticles, forKey: "home")
+        return fallbackArticles
     }
 
-    /// カテゴリ別：バックエンド（優先）+ GNews + RSS をマージ
+    /// カテゴリ別：通常はバックエンドのみ。疎通失敗時のみ direct fallback を許可。
     func fetchArticles(for category: NewsCategory) async throws -> [Article] {
         let key = category.rawValue
         let cached = loadCache(forKey: key)
         if !cached.isEmpty, !cacheExpired(forKey: key) { return cached }
 
-        var results: [Article] = []
-
-        await withTaskGroup(of: [Article].self) { group in
-            // バックエンドAPI（URL設定済みの場合のみ）
-            if isBackendConfigured {
-                group.addTask { await self.fetchFromBackend(category: category) }
+        if isBackendConfigured {
+            do {
+                let backendArticles = try await fetchFromBackend(category: category)
+                saveCache(backendArticles, forKey: key)
+                return backendArticles
+            } catch {
+                log("Backend category fetch failed [\(category.rawValue)]: \(error.localizedDescription)")
+                if !enableDirectFallback {
+                    throw error
+                }
+                log("Direct fallback enabled, using GNews/RSS for category \(category.rawValue)")
+                let fallbackArticles = try await fetchCategoryFallbackArticles(for: category)
+                saveCache(fallbackArticles, forKey: key)
+                return fallbackArticles
             }
-            // GNews API
-            group.addTask { (try? await self.fetchFromGNews(category: category)) ?? [] }
-            // カテゴリ専用RSSフィード
-            for feed in (kRSSFeeds[category] ?? []) {
-                group.addTask { await self.fetchFromRSS(feed: feed, category: category) }
-            }
-            for await articles in group { results.append(contentsOf: articles) }
         }
 
-        let merged = deduplicated(results).sorted { $0.publishedAt > $1.publishedAt }
-        saveCache(merged, forKey: key)
-        return merged
+        guard enableDirectFallback else { throw NewsError.networkError(0) }
+        let fallbackArticles = try await fetchCategoryFallbackArticles(for: category)
+        saveCache(fallbackArticles, forKey: key)
+        return fallbackArticles
     }
 
     /// 追加記事（キャッシュからシャッフル）
@@ -327,23 +334,35 @@ final class NewsService {
 
     /// バックエンド GET /api/v1/articles?category=xxx&limit=50
     /// - category nil → ホーム用（全件取得）
-    private func fetchFromBackend(category: NewsCategory?) async -> [Article] {
+    private func fetchFromBackend(category: NewsCategory?) async throws -> [Article] {
         var urlStr = "\(kBackendBaseURL)/api/v1/articles?limit=50"
         if let cat = category, let backendCat = backendCategoryName(for: cat) {
             let encoded = backendCat.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? backendCat
             urlStr += "&category=\(encoded)"
         }
-        guard let url = URL(string: urlStr) else { return [] }
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
-              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
+        guard let url = URL(string: urlStr) else { throw NewsError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse else {
+            throw NewsError.networkError(0)
+        }
+        guard http.statusCode == 200 else {
+            throw NewsError.networkError(http.statusCode)
+        }
 
-        let paginated = (try? JSONDecoder().decode(BackendPaginatedResponse.self, from: data))
-        guard let items = paginated?.items else { return [] }
+        let paginated = try JSONDecoder().decode(BackendPaginatedResponse.self, from: data)
+        let items = paginated.items
 
         return items.compactMap { item in
             guard !item.title.isEmpty, !item.url.isEmpty else { return nil }
             let appCat = category ?? appCategory(from: item.category)
-            guard passesFilter(item.title, for: appCat) else { return nil }
+            let summary = (item.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let content = (item.content ?? summary).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard Self.passesFinalFilter(
+                title: item.title,
+                summary: summary,
+                content: content,
+                for: appCat
+            ) else { return nil }
             // created_at: "2026-03-28T18:47:49.975749"（タイムゾーンなし）
             let date = Self.backendDateFormatter.date(from: item.created_at)
                     ?? ISO8601DateFormatter().date(from: item.created_at + "Z")
@@ -351,8 +370,8 @@ final class NewsService {
             return Article(
                 id:          UUID(),
                 title:       item.title,
-                summary:     item.summary,
-                content:     item.summary,
+                summary:     summary.isEmpty ? item.title : summary,
+                content:     content.isEmpty ? (summary.isEmpty ? item.title : summary) : content,
                 imageURL:    item.image_url ?? "",
                 sourceURL:   item.url,
                 sourceName:  "BrightNews",
@@ -376,9 +395,9 @@ final class NewsService {
         case .entertainment: return "エンタメ"
         case .health:        return "医療・健康"
         case .healing:       return "癒し"
+        case .goodStory:     return "いい話"
         case .sports:        return "スポーツ"
         case .local:         return "地域ニュース"
-        case .goodStory:     return nil   // goodStory はバックエンドに未対応 → GNews専用
         }
     }
 
@@ -389,6 +408,7 @@ final class NewsService {
         case "エンタメ":     return .entertainment
         case "医療・健康":   return .health
         case "癒し":         return .healing
+        case "いい話":       return .goodStory
         case "スポーツ":     return .sports
         case "地域ニュース": return .local
         default:             return .local
@@ -444,7 +464,7 @@ final class NewsService {
         guard !item.title.isEmpty, !item.url.isEmpty else { return nil }
 
         // カテゴリ別NGワードフィルター
-        if !passesFilter(item.title, for: category) { return nil }
+        if !Self.passesFinalFilter(title: item.title, summary: item.description ?? "", content: item.content ?? "", for: category) { return nil }
 
         let date = ISO8601DateFormatter().date(from: item.publishedAt) ?? Date()
 
@@ -479,16 +499,17 @@ final class NewsService {
 
     // MARK: - Private: カテゴリ別NGワードフィルター
 
-    private func passesFilter(_ title: String, for category: NewsCategory) -> Bool {
+    static func passesFinalFilter(title: String, summary: String, content: String, for category: NewsCategory) -> Bool {
         switch category {
-        case .goodStory: return passesGoodStoryFilter(title)
-        case .healing:   return passesHealingFilter(title)
+        case .goodStory: return passesGoodStoryFilter(title: title, summary: summary, content: content)
+        case .healing:   return passesHealingFilter(title: title, summary: summary, content: content)
         default:         return true
         }
     }
 
     /// 「いい話」: 人助け・善行・感動する話のみ。一つでも混入するとコンセプト崩壊のため厳格に管理。
-    private func passesGoodStoryFilter(_ title: String) -> Bool {
+    private static func passesGoodStoryFilter(title: String, summary: String, content: String) -> Bool {
+        let text = "\(title) \(summary) \(content)"
         let ngWords: [String] = [
             // 死亡・事件・事故
             "遺体", "死体", "殺人", "殺害", "殺す", "自殺", "自死", "死亡", "行方不明", "失踪",
@@ -505,14 +526,17 @@ final class NewsService {
             "感染拡大", "パンデミック", "新型コロナ",
             // 差別・ハラスメント
             "差別", "ハラスメント", "虐待",
+            // 終末期・介護負担・低評価
+            "終末期", "介護", "介護負担", "老老介護", "認知症", "低スコア", "低評価", "ワースト",
             // 天気・季節（無関係ニュース除外）
             "天気予報", "花見日和", "お花見", "晴れ予報", "花粉", "飛散",
         ]
-        return !ngWords.contains { title.contains($0) }
+        return !ngWords.contains { text.contains($0) }
     }
 
     /// 「癒し」: 動物・自然・ペット・癒し系に特化。花粉・注意報・警報・天気ニュースは除外。
-    private func passesHealingFilter(_ title: String) -> Bool {
+    private static func passesHealingFilter(title: String, summary: String, content: String) -> Bool {
+        let text = "\(title) \(summary) \(content)"
         let ngWords: [String] = [
             // アレルギー・注意報（癒しと逆効果）
             "花粉", "飛散", "注意報", "警報", "アレルギー", "発令",
@@ -526,8 +550,10 @@ final class NewsService {
             "感染", "ウイルス",
             // 政治・増税
             "増税", "防衛費", "核燃料",
+            // 終末期・介護負担・低評価
+            "終末期", "介護", "介護負担", "認知症", "低スコア", "低評価", "ワースト",
         ]
-        return !ngWords.contains { title.contains($0) }
+        return !ngWords.contains { text.contains($0) }
     }
 
     // MARK: - Private: RSS
@@ -540,7 +566,7 @@ final class NewsService {
         return parser.parse(data: data).compactMap { item in
             guard !item.title.isEmpty, !item.link.isEmpty else { return nil }
             // カテゴリ別NGワードフィルター
-            if !passesFilter(item.title, for: category) { return nil }
+            if !Self.passesFinalFilter(title: item.title, summary: item.desc, content: item.desc, for: category) { return nil }
             // summary: desc が空またはタイトルと同じなら title をそのまま使用
             let summary = (!item.desc.isEmpty && item.desc != item.title) ? item.desc : item.title
             return Article(
@@ -651,6 +677,41 @@ final class NewsService {
 
     // 本文のメモリキャッシュ（アプリ起動中のみ有効）
     private var bodyCache: [String: String] = [:]
+
+    private func fetchHomeFallbackArticles() async throws -> [Article] {
+        var results: [Article] = []
+        await withTaskGroup(of: [Article].self) { group in
+            let gnewsCategories: [NewsCategory] = [.technology, .entertainment, .sports, .health, .goodStory]
+            for cat in gnewsCategories {
+                group.addTask { (try? await self.fetchFromGNews(category: cat)) ?? [] }
+            }
+            for feed in kHomeRSSFeeds {
+                group.addTask { await self.fetchFromRSS(feed: feed, category: .goodStory) }
+            }
+            for await articles in group { results.append(contentsOf: articles) }
+        }
+        let merged = deduplicated(results).sorted { $0.publishedAt > $1.publishedAt }
+        guard !merged.isEmpty else { throw NewsError.networkError(0) }
+        return merged
+    }
+
+    private func fetchCategoryFallbackArticles(for category: NewsCategory) async throws -> [Article] {
+        var results: [Article] = []
+        await withTaskGroup(of: [Article].self) { group in
+            group.addTask { (try? await self.fetchFromGNews(category: category)) ?? [] }
+            for feed in (kRSSFeeds[category] ?? []) {
+                group.addTask { await self.fetchFromRSS(feed: feed, category: category) }
+            }
+            for await articles in group { results.append(contentsOf: articles) }
+        }
+        let merged = deduplicated(results).sorted { $0.publishedAt > $1.publishedAt }
+        guard !merged.isEmpty else { throw NewsError.networkError(0) }
+        return merged
+    }
+
+    private func log(_ message: String) {
+        print("[NewsService] \(message)")
+    }
 
     // MARK: - Private: 重複排除
 
